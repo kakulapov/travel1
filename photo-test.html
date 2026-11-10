@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Photo location test</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7/dist/full.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #ffffff);
+      --bg2: var(--tg-theme-secondary-bg-color, #f2f2f7);
+      --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+      --text: var(--tg-theme-text-color, #000000);
+      --hint: var(--tg-theme-hint-color, #8e8e93);
+      --accent: var(--tg-theme-button-color, #2481cc);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+      --ok: #34c759; --warn: #ff9500; --bad: #ff3b30;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg2); color: var(--text); font-size: 16px; padding: 18px 16px 40px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    .card { background: var(--card); border-radius: 14px; padding: 14px; margin: 12px 0; }
+    .label { color: var(--hint); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; font-weight: 600; }
+    .sub { color: var(--hint); font-size: 13px; line-height: 1.45; }
+    .big { font-size: 40px; font-weight: 700; }
+    .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 600; text-align: center; cursor: pointer; }
+    .btn.off { opacity: .5; pointer-events: none; }
+    input[type=file] { display: none; }
+    ol { margin: 6px 0 0; padding-left: 20px; } li { margin-bottom: 6px; font-size: 14px; line-height: 1.4; }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(128,128,128,.15); font-size: 15px; }
+    .row:last-child { border-bottom: none; }
+    .verdict { font-weight: 700; font-size: 18px; margin-top: 6px; }
+    .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--hint); word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Photo location test</h1>
+  <div class="sub">Checks whether photos picked inside Telegram still carry their GPS tags. Everything runs on your phone. No photos are uploaded.</div>
+
+  <div class="card">
+    <div class="label">Before you pick</div>
+    <ol>
+      <li><b>iPhone:</b> in the photo picker, tap <b>Options</b> at the top and turn <b>Location</b> on if you see it.</li>
+      <li>Pick photos from a few different trips. 20–200 is plenty for a test.</li>
+      <li>Screenshot the result and send it to me.</li>
+    </ol>
+  </div>
+
+  <label class="btn off" id="pickBtn" for="picker">Loading map data…</label>
+  <input type="file" id="picker" accept="image/*" multiple>
+
+  <div id="out"></div>
+
+  <div class="card">
+    <div class="label">Device</div>
+    <div class="mono" id="device"></div>
+  </div>
+
+  <script>
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    if (tg) { tg.ready(); tg.expand(); }
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    $("device").textContent = [
+      "Telegram: " + (tg && tg.initData ? `yes · ${tg.platform} · v${tg.version}` : "no (normal browser)"),
+      "Browser: " + navigator.userAgent
+    ].join("\n");
+
+    // ---------- Country lookup (offline, from a world map) ----------
+    let countries = []; // { name, polys: [[outerRing, ...holes], ...], bbox }
+    async function loadMap() {
+      try {
+        const topo = await (await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json")).json();
+        const geo = topojson.feature(topo, topo.objects.countries);
+        countries = geo.features.filter(f => f.geometry).map(f => {
+          const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+          let minX = 180, minY = 90, maxX = -180, maxY = -90;
+          polys.forEach(p => p[0].forEach(([x, y]) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }));
+          return { name: f.properties.name, polys, bbox: [minX, minY, maxX, maxY] };
+        });
+        $("pickBtn").textContent = "Pick photos";
+        $("pickBtn").classList.remove("off");
+      } catch (e) {
+        $("pickBtn").textContent = "Couldn't load map data. Check your connection and reopen.";
+      }
+    }
+
+    function inRing(x, y, ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+
+    function countryAt(lat, lon) {
+      for (const c of countries) {
+        const [a, b, cc, d] = c.bbox;
+        if (lon < a || lon > cc || lat < b || lat > d) continue;
+        for (const p of c.polys) if (inRing(lon, lat, p[0]) && !p.slice(1).some(h => inRing(lon, lat, h))) return c.name;
+      }
+      // Not inside any border (e.g. a beach or boat): take the nearest country within ~30 km
+      let best = null, bestKm = 30;
+      const kx = 111 * Math.cos(lat * Math.PI / 180);
+      for (const c of countries) {
+        const [a, b, cc, d] = c.bbox;
+        if (lon < a - 0.5 || lon > cc + 0.5 || lat < b - 0.5 || lat > d + 0.5) continue;
+        for (const p of c.polys) for (const [x, y] of p[0]) {
+          const km = Math.hypot((x - lon) * kx, (y - lat) * 111);
+          if (km < bestKm) { bestKm = km; best = c.name; }
+        }
+      }
+      return best || "Unknown (at sea?)";
+    }
+
+    // ---------- Reading photos ----------
+    const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const fmt = k => new Date(k + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    const MAX_GAP_DAYS = 7; // photos in the same country this close together are treated as one stay
+
+    $("picker").onchange = async e => {
+      const files = [...e.target.files];
+      if (!files.length) return;
+      const out = $("out");
+      let withGps = 0, withDate = 0, failed = 0;
+      const points = [];
+      for (let i = 0; i < files.length; i++) {
+        out.innerHTML = `<div class="card"><div class="sub">Reading ${i + 1} of ${files.length}…</div></div>`;
+        try {
+          const m = await exifr.parse(files[i], { tiff: true, exif: true, gps: true, xmp: false, icc: false, iptc: false });
+          const date = m && (m.DateTimeOriginal || m.CreateDate || m.ModifyDate);
+          const hasGps = m && typeof m.latitude === "number" && typeof m.longitude === "number" && !(m.latitude === 0 && m.longitude === 0);
+          if (date instanceof Date && !isNaN(date)) withDate++;
+          if (hasGps) withGps++;
+          if (hasGps && date instanceof Date && !isNaN(date)) points.push({ t: date.getTime(), day: dayKey(date), country: countryAt(m.latitude, m.longitude) });
+        } catch (err) { failed++; }
+      }
+      e.target.value = "";
+      render(files.length, withGps, withDate, failed, points);
+    };
+
+    function buildTrips(points) {
+      points.sort((a, b) => a.t - b.t);
+      const trips = [];
+      for (const p of points) {
+        const last = trips[trips.length - 1];
+        const gap = last ? (new Date(p.day) - new Date(last.end)) / 86400000 : Infinity;
+        if (last && last.country === p.country && gap <= MAX_GAP_DAYS) { last.end = p.day; last.photos++; }
+        else trips.push({ country: p.country, start: p.day, end: p.day, photos: 1 });
+      }
+      return trips;
+    }
+
+    function render(total, withGps, withDate, failed, points) {
+      const pct = Math.round(withGps / total * 100);
+      const verdict = pct >= 80 ? ["Works ✅ — locations come through", "var(--ok)"]
+        : pct > 0 ? ["Partial ⚠️ — some photos lost their location", "var(--warn)"]
+        : ["Blocked ❌ — locations were stripped", "var(--bad)"];
+      const trips = buildTrips(points);
+      const byCountry = {};
+      trips.forEach(t => { const n = (new Date(t.end) - new Date(t.start)) / 86400000 + 1; byCountry[t.country] = (byCountry[t.country] || 0) + n; });
+
+      let h = `<div class="card"><div class="label">Result</div>
+        <div><span class="big">${withGps}</span><span class="sub"> / ${total} photos had a location</span></div>
+        <div class="verdict" style="color:${verdict[1]}">${verdict[0]}</div>
+        <div class="sub" style="margin-top:6px">${withDate} had a date taken${failed ? ` · ${failed} couldn't be read` : ""}</div></div>`;
+
+      if (trips.length) {
+        h += `<div class="card"><div class="label">Trips found (${trips.length})</div>${[...trips].reverse().map(t => {
+          const n = (new Date(t.end) - new Date(t.start)) / 86400000 + 1;
+          return `<div class="row"><div><b>${esc(t.country)}</b><div class="sub">${fmt(t.start)}${t.end !== t.start ? " – " + fmt(t.end) : ""} · ${t.photos} photo${t.photos > 1 ? "s" : ""}</div></div><div><b>${n}</b> <span class="sub">day${n > 1 ? "s" : ""}</span></div></div>`;
+        }).join("")}<div class="sub" style="margin-top:8px">Photos in the same country up to ${MAX_GAP_DAYS} days apart are joined into one stay.</div></div>`;
+
+        h += `<div class="card"><div class="label">Days by country (estimated)</div>${Object.entries(byCountry).sort((a, b) => b[1] - a[1])
+          .map(([c, n]) => `<div class="row"><b>${esc(c)}</b><span><b>${n}</b> <span class="sub">day${n > 1 ? "s" : ""}</span></span></div>`).join("")}</div>`;
+      } else if (withGps === 0) {
+        h += `<div class="card"><div class="sub">No locations came through. On iPhone, try again and look for <b>Options → Location</b> in the picker. If there's no such option inside Telegram, Telegram's picker is stripping it.</div></div>`;
+      }
+      $("out").innerHTML = h;
+    }
+
+    loadMap();
+  </script>
+</body>
+</html>
