@@ -2,34 +2,453 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Mini App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Day Tracker</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--tg-theme-bg-color, #ffffff);
-      color: var(--tg-theme-text-color, #000000);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-      font-size: 24px;
+    :root {
+      --bg: var(--tg-theme-bg-color, #ffffff);
+      --bg2: var(--tg-theme-secondary-bg-color, #f2f2f7);
+      --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+      --text: var(--tg-theme-text-color, #000000);
+      --hint: var(--tg-theme-hint-color, #8e8e93);
+      --accent: var(--tg-theme-button-color, #2481cc);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+      --danger: var(--tg-theme-destructive-text-color, #e53935);
+      --ok: #34c759;
+      --warn: #ff9500;
+      --bad: #ff3b30;
     }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg2);
+      color: var(--text);
+      font-size: 16px;
+      -webkit-tap-highlight-color: transparent;
+      padding-bottom: 96px;
+    }
+    header { padding: 18px 16px 4px; }
+    h1 { font-size: 24px; margin: 0; }
+    h2 { font-size: 20px; margin: 0 0 16px; }
+    .tabs { display: flex; gap: 8px; padding: 10px 16px; }
+    .tab {
+      flex: 1; padding: 9px; border: none; border-radius: 10px;
+      background: var(--card); color: var(--text); font-size: 15px; font-weight: 600;
+    }
+    .tab.active { background: var(--accent); color: var(--accent-text); }
+    main { padding: 0 16px; }
+    .card { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+    .label { color: var(--hint); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; font-weight: 600; }
+    .big { font-size: 36px; font-weight: 700; }
+    .row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(128,128,128,.15); }
+    .row:last-child { border-bottom: none; }
+    .trip { cursor: pointer; }
+    .flag { font-size: 28px; line-height: 1; width: 34px; text-align: center; }
+    .grow { flex: 1; min-width: 0; }
+    .name { font-weight: 600; }
+    .sub { color: var(--hint); font-size: 13px; }
+    .days { font-weight: 700; font-size: 20px; text-align: right; }
+    .days .sub { font-weight: 400; }
+    .bar { height: 6px; border-radius: 3px; background: rgba(128,128,128,.2); margin-top: 6px; overflow: hidden; }
+    .bar > div { height: 100%; border-radius: 3px; }
+    select, input[type=date] {
+      width: 100%; padding: 12px; border-radius: 10px; border: 1px solid rgba(128,128,128,.3);
+      background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit;
+      -webkit-appearance: none; appearance: none;
+    }
+    .field { margin-bottom: 14px; }
+    .field > label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 6px; }
+    .check { display: flex; align-items: center; gap: 10px; }
+    .check input { width: 20px; height: 20px; margin: 0; }
+    .check label { font-size: 16px; color: var(--text); }
+    .btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .btn.plain { background: transparent; color: var(--hint); margin-top: 6px; }
+    .btn.danger { background: transparent; color: var(--danger); margin-top: 6px; }
+    .fab { position: fixed; left: 16px; right: 16px; bottom: 16px; width: auto; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238e8e93' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px;
+    }
+    .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: flex-end; z-index: 10; }
+    .sheet-bg.open { display: flex; }
+    .sheet { background: var(--bg); width: 100%; border-radius: 18px 18px 0 0; padding: 20px 16px 28px; max-height: 92vh; overflow: auto; }
+    .empty { text-align: center; color: var(--hint); padding: 24px 8px; line-height: 1.5; }
+    .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: var(--accent); color: var(--accent-text); margin-left: 6px; vertical-align: middle; }
+    .pill.grey { background: var(--hint); }
+    .note { font-size: 12px; color: var(--hint); line-height: 1.45; margin: 4px 2px 12px; }
+    .err { color: var(--bad); font-size: 14px; min-height: 18px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
-  <div id="app">Loading...</div>
+  <header>
+    <h1 id="appName"></h1>
+    <div class="sub" id="storageHint"></div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="trips">Trips</button>
+  </div>
+
+  <main id="main"><div class="card empty">Loading…</div></main>
+
+  <button class="btn fab" id="addBtn">+ Add trip</button>
+
+  <div class="sheet-bg" id="sheetBg">
+    <div class="sheet">
+      <h2 id="sheetTitle">Add trip</h2>
+      <div class="field">
+        <label for="fCountry">Country</label>
+        <select id="fCountry"></select>
+      </div>
+      <div class="field">
+        <label for="fArr">Arrived</label>
+        <input type="date" id="fArr">
+      </div>
+      <div class="field check">
+        <input type="checkbox" id="fOngoing">
+        <label for="fOngoing">I'm still there</label>
+      </div>
+      <div class="field" id="depField">
+        <label for="fDep">Left</label>
+        <input type="date" id="fDep">
+      </div>
+      <div class="err" id="fErr"></div>
+      <button class="btn" id="fSave">Save</button>
+      <button class="btn danger" id="fDelete">Delete trip</button>
+      <button class="btn plain" id="fCancel">Cancel</button>
+    </div>
+  </div>
 
   <script>
-    const tg = window.Telegram.WebApp;
-    tg.ready();
-    tg.expand();
+    // ===================== SETTINGS YOU CAN CHANGE =====================
+    const APP_NAME = "Day Tracker";   // ← rename your app here
+    const TAX_THRESHOLD = 183;        // day count that commonly triggers tax residency
+    // ====================================================================
 
-    const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    document.getElementById("app").textContent =
-      user ? `Hi, ${user.first_name} 👋` : "Hi! Open me inside Telegram 👋";
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    const inTelegram = !!(tg && tg.initData);
+    if (tg) { tg.ready(); tg.expand(); }
+    const tgAtLeast = v => !!(inTelegram && tg.isVersionAtLeast && tg.isVersionAtLeast(v));
+
+    document.getElementById("appName").textContent = APP_NAME;
+    document.title = APP_NAME;
+
+    // ---------- Countries ----------
+    const SCHENGEN = new Set("AT BE BG CH CZ DE DK EE ES FI FR GR HR HU IS IT LI LT LU LV MT NL NO PL PT RO SE SI SK".split(" "));
+    const CODES = ("AD AE AF AG AL AM AO AR AT AU AZ BA BB BD BE BF BG BH BI BJ BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CL CM CN CO CR CU CV CY CZ " +
+      "DE DJ DK DM DO DZ EC EE EG ER ES ET FI FJ FM FR GA GB GD GE GG GH GI GM GN GQ GR GT GW GY HK HN HR HT HU ID IE IL IM IN IQ IR IS IT " +
+      "JE JM JO JP KE KG KH KI KM KN KP KR KW KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MR MT MU MV MW MX MY MZ " +
+      "NA NE NG NI NL NO NP NR NZ OM PA PE PG PH PK PL PR PS PT PW PY QA RO RS RU RW SA SB SC SD SE SG SI SK SL SM SN SO SR SS ST SV SY SZ " +
+      "TD TG TH TJ TL TM TN TO TR TT TV TW TZ UA UG US UY UZ VA VC VE VN VU WS XK YE ZA ZM ZW").split(" ");
+    const CODE_SET = new Set(CODES);
+    let regionNames = null;
+    try { regionNames = new Intl.DisplayNames(["en"], { type: "region" }); } catch (e) {}
+    const nameOf = c => { try { return (regionNames && regionNames.of(c)) || c; } catch (e) { return c; } };
+    const flagOf = c => String.fromCodePoint(...[...c].map(ch => 0x1F1E6 + ch.charCodeAt(0) - 65));
+    const COUNTRIES = CODES.map(c => ({ code: c, name: nameOf(c) })).sort((a, b) => a.name.localeCompare(b.name));
+
+    // ---------- Dates (whole days, timezone-safe) ----------
+    const DAY = 86400000;
+    const toNum = s => { const [y, m, d] = s.split("-").map(Number); return Math.round(Date.UTC(y, m - 1, d) / DAY); };
+    const toStr = n => new Date(n * DAY).toISOString().slice(0, 10);
+    const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+    const fmt = s => new Date(toNum(s) * DAY).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    const isDate = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+    // ---------- Storage: Telegram CloudStorage inside Telegram, browser storage outside ----------
+    const useCloud = !!(tgAtLeast("6.9") && tg.CloudStorage);
+    const memory = {};
+    const local = {
+      keys() { try { return Object.keys(localStorage); } catch (e) { return Object.keys(memory); } },
+      get(k) { try { return localStorage.getItem(k); } catch (e) { return memory[k] ?? null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (e) { memory[k] = v; } },
+      del(k) { try { localStorage.removeItem(k); } catch (e) { delete memory[k]; } }
+    };
+    const cb = (res, rej) => (err, val) => err ? rej(new Error(err)) : res(val);
+    const store = {
+      keys: () => useCloud ? new Promise((res, rej) => tg.CloudStorage.getKeys(cb(res, rej))) : Promise.resolve(local.keys()),
+      async getMany(keys) {
+        const out = {};
+        if (!useCloud) { keys.forEach(k => out[k] = local.get(k)); return out; }
+        for (let i = 0; i < keys.length; i += 20) {
+          const part = await new Promise((res, rej) => tg.CloudStorage.getItems(keys.slice(i, i + 20), cb(res, rej)));
+          Object.assign(out, part);
+        }
+        return out;
+      },
+      set: (k, v) => useCloud ? new Promise((res, rej) => tg.CloudStorage.setItem(k, v, cb(res, rej))) : Promise.resolve(local.set(k, v)),
+      del: k => useCloud ? new Promise((res, rej) => tg.CloudStorage.removeItem(k, cb(res, rej))) : Promise.resolve(local.del(k))
+    };
+    document.getElementById("storageHint").textContent = useCloud
+      ? "Saved to your Telegram account"
+      : "Saved in this browser only — open in Telegram to sync";
+
+    // ---------- State ----------
+    let trips = [];                 // { id, c: "FR", a: "2026-01-03", d: "2026-01-10" | null }
+    let settings = { mode: "any" }; // "any" = any part of a day counts, "midnight" = only nights count
+    let tab = "overview";
+    let periodId = null;
+    let editingId = null;
+
+    const validTrip = o => o && CODE_SET.has(o.c) && isDate(o.a) && (o.d === null || o.d === undefined || isDate(o.d));
+
+    async function load() {
+      try {
+        const keys = (await store.keys()).filter(k => k.startsWith("t_") || k === "settings");
+        const vals = await store.getMany(keys);
+        trips = [];
+        for (const k of keys) {
+          if (!vals[k]) continue;
+          try {
+            const o = JSON.parse(vals[k]);
+            if (k === "settings") { if (o.mode === "any" || o.mode === "midnight") settings.mode = o.mode; }
+            else if (validTrip(o)) trips.push({ id: k, c: o.c, a: o.a, d: o.d || null });
+          } catch (e) {}
+        }
+      } catch (e) {
+        document.getElementById("main").innerHTML = `<div class="card empty">Couldn't load your data: ${esc(e.message)}</div>`;
+        return;
+      }
+      render();
+    }
+
+    // ---------- Day counting ----------
+    // Returns [firstDay, lastDay] (inclusive day numbers) that a trip counts for.
+    function tripRange(t, mode) {
+      const today = toNum(todayStr());
+      const a = toNum(t.a);
+      let end;
+      if (t.d) { end = toNum(t.d); if (mode === "midnight") end -= 1; }
+      else end = Math.max(today, a); // still there → counts up to today
+      return end < a ? null : [a, end];
+    }
+
+    function countByCountry(start, end, mode) {
+      const sets = {};
+      for (const t of trips) {
+        const r = tripRange(t, mode);
+        if (!r) continue;
+        for (let n = Math.max(r[0], start); n <= Math.min(r[1], end); n++) (sets[t.c] = sets[t.c] || new Set()).add(n);
+      }
+      return Object.entries(sets).map(([code, s]) => ({ code, days: s.size })).sort((x, y) => y.days - x.days);
+    }
+
+    // Schengen 90/180: entry and exit days both count; all Schengen countries are pooled.
+    function schengenInfo() {
+      const today = toNum(todayStr());
+      const days = new Set();
+      for (const t of trips) {
+        if (!SCHENGEN.has(t.c)) continue;
+        const r = tripRange(t, "any");
+        if (r) for (let n = r[0]; n <= r[1]; n++) days.add(n);
+      }
+      const sorted = [...days].sort((a, b) => a - b);
+      const usedOn = ref => sorted.filter(n => n > ref - 180 && n <= ref).length;
+      const used = usedOn(today);
+      // Look ahead through planned trips for the worst point
+      let peak = used, peakDay = today;
+      const last = sorted.length ? sorted[sorted.length - 1] : today;
+      for (let ref = today + 1; ref <= last; ref++) {
+        const u = usedOn(ref);
+        if (u > peak) { peak = u; peakDay = ref; }
+      }
+      return { used, peak, peakDay };
+    }
+
+    function periods() {
+      const t = todayStr(), y = +t.slice(0, 4);
+      const years = new Set([y]);
+      trips.forEach(tr => { years.add(+tr.a.slice(0, 4)); if (tr.d) years.add(+tr.d.slice(0, 4)); });
+      const ys = [...years].sort((a, b) => b - a);
+      const cal = ys.map(yr => ({ id: "y" + yr, group: "Calendar year", label: String(yr), s: toNum(`${yr}-01-01`), e: toNum(`${yr}-12-31`) }));
+      const curTY = t >= `${y}-04-06` ? y : y - 1;
+      const taxYearOf = s => { const yr = +s.slice(0, 4); return s >= `${yr}-04-06` ? yr : yr - 1; };
+      const tys = new Set([curTY]);
+      trips.forEach(tr => { tys.add(taxYearOf(tr.a)); if (tr.d) tys.add(taxYearOf(tr.d)); });
+      const uk = [...tys].sort((a, b) => b - a).map(ty => ({
+        id: "uk" + ty, group: "UK tax year (6 Apr – 5 Apr)", label: `${ty}/${String(ty + 1).slice(2)}`,
+        s: toNum(`${ty}-04-06`), e: toNum(`${ty + 1}-04-05`)
+      }));
+      const roll = [{ id: "r365", group: "Rolling", label: "Last 365 days", s: toNum(t) - 364, e: toNum(t) }];
+      return [...cal, ...uk, ...roll];
+    }
+
+    const colour = (v, limit) => v >= limit ? "var(--bad)" : v >= limit * 0.8 ? "var(--warn)" : "var(--ok)";
+
+    // ---------- Rendering ----------
+    function render() {
+      document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+      const main = document.getElementById("main");
+      main.innerHTML = tab === "overview" ? renderOverview() : renderTrips();
+      if (tab === "overview") {
+        document.getElementById("period").onchange = e => { periodId = e.target.value; render(); };
+        document.getElementById("mode").onchange = async e => {
+          settings.mode = e.target.value;
+          render();
+          try { await store.set("settings", JSON.stringify(settings)); } catch (err) {}
+        };
+      }
+      main.querySelectorAll(".trip").forEach(el => el.onclick = () => openSheet(el.dataset.id));
+    }
+
+    function renderOverview() {
+      const today = toNum(todayStr());
+      const ps = periods();
+      if (!periodId || !ps.find(p => p.id === periodId)) periodId = "y" + todayStr().slice(0, 4);
+      const p = ps.find(x => x.id === periodId);
+      const counts = countByCountry(p.s, p.e, settings.mode);
+      let h = "";
+
+      // Where you are now
+      const now = trips.filter(t => !t.d && toNum(t.a) <= today).sort((a, b) => b.a.localeCompare(a.a))[0];
+      if (now) {
+        h += `<div class="card"><div class="label">Right now</div>
+          <div class="row" style="border:none;padding:0"><span class="flag">${flagOf(now.c)}</span>
+          <div class="grow"><div class="name">${esc(nameOf(now.c))}</div>
+          <div class="sub">Since ${fmt(now.a)} · day ${today - toNum(now.a) + 1}</div></div></div></div>`;
+      }
+
+      // Schengen
+      const s = schengenInfo();
+      h += `<div class="card"><div class="label">Schengen 90/180</div>
+        <div><span class="big">${s.used}</span><span class="sub"> / 90 days used</span></div>
+        <div class="bar"><div style="width:${Math.min(100, s.used / 90 * 100)}%;background:${colour(s.used, 90)}"></div></div>
+        <div class="sub" style="margin-top:8px">${s.used >= 90 ? "Limit reached for the current 180-day window." : `${90 - s.used} days left in the current 180-day window`}</div>
+        ${s.peak > s.used ? `<div class="sub" style="margin-top:4px;color:${s.peak > 90 ? "var(--bad)" : "var(--hint)"}">With planned trips: peaks at ${s.peak}/90 on ${fmt(toStr(s.peakDay))}${s.peak > 90 ? " ⚠️ over the limit" : ""}</div>` : ""}
+      </div>`;
+
+      // Days by country
+      const groups = [...new Set(ps.map(x => x.group))];
+      const opts = groups.map(g => `<optgroup label="${esc(g)}">${ps.filter(x => x.group === g)
+        .map(x => `<option value="${x.id}" ${x.id === periodId ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>`).join("");
+      const rows = counts.map(c => `
+        <div class="row"><span class="flag">${flagOf(c.code)}</span>
+          <div class="grow"><div class="name">${esc(nameOf(c.code))}</div>
+            <div class="sub">${c.days >= TAX_THRESHOLD ? `Over ${TAX_THRESHOLD} days` : `${TAX_THRESHOLD - c.days} days below ${TAX_THRESHOLD}`}</div>
+            <div class="bar"><div style="width:${Math.min(100, c.days / TAX_THRESHOLD * 100)}%;background:${colour(c.days, TAX_THRESHOLD)}"></div></div>
+          </div>
+          <div class="days">${c.days}<div class="sub">days</div></div>
+        </div>`).join("");
+      h += `<div class="card"><div class="label">Days by country</div>
+        <select id="period">${opts}</select>
+        <div style="margin-top:6px">${rows || `<div class="empty">No days logged in this period.</div>`}</div></div>`;
+
+      // Counting method
+      h += `<div class="card"><div class="label">How travel days count</div>
+        <select id="mode">
+          <option value="any" ${settings.mode === "any" ? "selected" : ""}>Any part of a day counts</option>
+          <option value="midnight" ${settings.mode === "midnight" ? "selected" : ""}>Only nights count (UK-style midnight rule)</option>
+        </select>
+        <div class="note" style="margin:8px 0 0">Applies to “Days by country”. Schengen always counts entry and exit days.</div></div>`;
+
+      h += `<p class="note">Estimates only, not legal or tax advice. Rules differ by country. Check with an adviser before relying on these numbers.</p>`;
+      return h;
+    }
+
+    function renderTrips() {
+      if (!trips.length) return `<div class="card empty">No trips yet.<br>Tap “+ Add trip” to log where you've been.</div>`;
+      const today = todayStr();
+      const rows = [...trips].sort((a, b) => b.a.localeCompare(a.a)).map(t => {
+        const r = tripRange(t, "any");
+        const n = r ? r[1] - r[0] + 1 : 0;
+        const pill = t.a > today ? `<span class="pill grey">Planned</span>` : !t.d ? `<span class="pill">Now</span>` : "";
+        return `<div class="row trip" data-id="${esc(t.id)}"><span class="flag">${flagOf(t.c)}</span>
+          <div class="grow"><div class="name">${esc(nameOf(t.c))}${pill}</div>
+          <div class="sub">${fmt(t.a)} – ${t.d ? fmt(t.d) : "now"}</div></div>
+          <div class="days">${n}<div class="sub">days</div></div></div>`;
+      }).join("");
+      return `<div class="card">${rows}</div><p class="note">Tap a trip to edit or delete it.</p>`;
+    }
+
+    // ---------- Add / edit sheet ----------
+    const $ = id => document.getElementById(id);
+    const backHandler = () => closeSheet();
+
+    function fillCountries(selected) {
+      const recent = [...trips].sort((a, b) => b.a.localeCompare(a.a)).map(t => t.c).filter((c, i, arr) => arr.indexOf(c) === i).slice(0, 5);
+      const opt = c => `<option value="${c.code}">${flagOf(c.code)} ${esc(c.name)}</option>`;
+      $("fCountry").innerHTML =
+        `<option value="">Choose a country…</option>` +
+        (recent.length ? `<optgroup label="Recent">${recent.map(c => opt({ code: c, name: nameOf(c) })).join("")}</optgroup>` : "") +
+        `<optgroup label="All countries">${COUNTRIES.map(opt).join("")}</optgroup>`;
+      $("fCountry").value = selected || "";
+    }
+
+    function syncDep() { $("depField").style.display = $("fOngoing").checked ? "none" : "block"; }
+
+    function openSheet(id) {
+      editingId = id || null;
+      const t = trips.find(x => x.id === id);
+      $("sheetTitle").textContent = t ? "Edit trip" : "Add trip";
+      fillCountries(t ? t.c : "");
+      $("fArr").value = t ? t.a : todayStr();
+      $("fOngoing").checked = t ? !t.d : false;
+      $("fDep").value = t && t.d ? t.d : todayStr();
+      $("fDelete").style.display = t ? "block" : "none";
+      $("fErr").textContent = "";
+      syncDep();
+      $("sheetBg").classList.add("open");
+      if (tgAtLeast("6.1")) { tg.BackButton.onClick(backHandler); tg.BackButton.show(); }
+    }
+
+    function closeSheet() {
+      $("sheetBg").classList.remove("open");
+      if (tgAtLeast("6.1")) { tg.BackButton.offClick(backHandler); tg.BackButton.hide(); }
+    }
+
+    async function saveTrip() {
+      const c = $("fCountry").value, a = $("fArr").value, ongoing = $("fOngoing").checked, d = ongoing ? null : $("fDep").value;
+      if (!CODE_SET.has(c)) return $("fErr").textContent = "Choose a country.";
+      if (!isDate(a)) return $("fErr").textContent = "Add the date you arrived.";
+      if (!ongoing && !isDate(d)) return $("fErr").textContent = "Add the date you left, or tick “I'm still there”.";
+      if (d && d < a) return $("fErr").textContent = "You can't leave before you arrive.";
+      const id = editingId || "t_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const trip = { c, a, d };
+      $("fSave").disabled = true;
+      try {
+        await store.set(id, JSON.stringify(trip));
+        trips = trips.filter(x => x.id !== id).concat([{ id, ...trip }]);
+        if (tgAtLeast("6.1")) tg.HapticFeedback.notificationOccurred("success");
+        closeSheet();
+        render();
+      } catch (e) {
+        $("fErr").textContent = "Couldn't save: " + e.message;
+      } finally {
+        $("fSave").disabled = false;
+      }
+    }
+
+    function deleteTrip() {
+      const go = async ok => {
+        if (!ok) return;
+        try {
+          await store.del(editingId);
+          trips = trips.filter(x => x.id !== editingId);
+          closeSheet();
+          render();
+        } catch (e) { $("fErr").textContent = "Couldn't delete: " + e.message; }
+      };
+      if (tgAtLeast("6.2")) tg.showConfirm("Delete this trip?", go);
+      else go(window.confirm("Delete this trip?"));
+    }
+
+    // ---------- Wiring ----------
+    document.querySelectorAll(".tab").forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
+    $("addBtn").onclick = () => openSheet(null);
+    $("fOngoing").onchange = syncDep;
+    $("fSave").onclick = saveTrip;
+    $("fDelete").onclick = deleteTrip;
+    $("fCancel").onclick = closeSheet;
+    $("sheetBg").onclick = e => { if (e.target.id === "sheetBg") closeSheet(); };
+
+    load();
   </script>
 </body>
 </html>
