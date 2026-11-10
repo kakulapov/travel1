@@ -82,6 +82,44 @@
     .pill.grey { background: var(--hint); }
     .note { font-size: 12px; color: var(--hint); line-height: 1.45; margin: 4px 2px 12px; }
     .err { color: var(--bad); font-size: 14px; min-height: 18px; margin-bottom: 8px; }
+    .btn.outline { background: var(--card); color: var(--accent); margin-bottom: 12px; }
+    .btn.off { opacity: .5; pointer-events: none; }
+    input[type=file] { display: none; }
+    .prop { cursor: pointer; }
+    .prop input { width: 22px; height: 22px; margin: 0; flex: none; }
+    .prop.dim { opacity: .5; }
+    .progress { height: 6px; border-radius: 3px; background: rgba(128,128,128,.2); margin-top: 10px; overflow: hidden; }
+    .progress > div { height: 100%; background: var(--accent); transition: width .2s; }
+    .hero-top { display: flex; align-items: center; gap: 14px; margin: 4px 0 10px; }
+
+    .hero-days { font-size: 44px; font-weight: 700; line-height: 1; }
+    .seg { display: flex; background: var(--card); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+    .seg button { flex: 1; border: none; background: transparent; color: var(--text); padding: 8px; border-radius: 9px; font-size: 14px; font-weight: 600; }
+    .seg button.on { background: var(--bg2); color: var(--accent); }
+    .wk { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); background: var(--bg2); padding: 8px 0; font-size: 13px; color: var(--hint); text-align: center; font-weight: 600; }
+    .wk .on { color: var(--text); }
+    .month { margin: 10px 0 18px; }
+    .mhead { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 10px; }
+    .mname { font-size: 24px; font-weight: 700; }
+    .myear { color: var(--hint); font-size: 15px; }
+    .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+    .tile { background: var(--card); border-radius: 14px; aspect-ratio: .72; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; cursor: pointer; }
+    .tile .dnum { font-size: 16px; font-weight: 500; }
+    .tile.none .dnum { color: var(--hint); opacity: .6; }
+    .tile.today { box-shadow: inset 0 0 0 2px var(--accent); }
+    .flags { display: flex; align-items: center; justify-content: center; height: 26px; max-width: 100%; }
+    .flags.n3 .fc + .fc { margin-left: -16px; }
+    .fc { width: 26px; height: 26px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--bg2); }
+    .fc span { font-size: 37px; line-height: 1; }
+    .fc + .fc { margin-left: -11px; box-shadow: 0 0 0 2px var(--card); }
+    .fc.lg { width: 32px; height: 32px; } .fc.lg span { font-size: 46px; }
+    .fc.hero-flag { width: 56px; height: 56px; }
+    .fc.hero-flag span { font-size: 80px; }
+    .month { scroll-margin-top: 40px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(128,128,128,.25); }
+    .more { font-size: 10px; color: var(--hint); margin-left: 2px; }
+    #toast { position: fixed; left: 16px; right: 16px; bottom: 84px; z-index: 20; background: rgba(0,0,0,.85); color: #fff; padding: 12px 14px; border-radius: 12px; font-size: 14px; display: none; }
+    ol.tips { margin: 6px 0 0; padding-left: 20px; } ol.tips li { margin-bottom: 6px; font-size: 14px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -98,6 +136,8 @@
   <main id="main"><div class="card empty">Loading…</div></main>
 
   <button class="btn fab" id="addBtn">+ Add trip</button>
+  <input type="file" id="photoPicker" accept="image/*" multiple>
+  <div id="toast"></div>
 
   <div class="sheet-bg" id="sheetBg">
     <div class="sheet">
@@ -140,7 +180,6 @@
     document.title = APP_NAME;
 
     // ---------- Countries ----------
-    const SCHENGEN = new Set("AT BE BG CH CZ DE DK EE ES FI FR GR HR HU IS IT LI LT LU LV MT NL NO PL PT RO SE SI SK".split(" "));
     const CODES = ("AD AE AF AG AL AM AO AR AT AU AZ BA BB BD BE BF BG BH BI BJ BN BO BR BS BT BW BY BZ CA CD CF CG CH CI CL CM CN CO CR CU CV CY CZ " +
       "DE DJ DK DM DO DZ EC EE EG ER ES ET FI FJ FM FR GA GB GD GE GG GH GI GM GN GQ GR GT GW GY HK HN HR HT HU ID IE IL IM IN IQ IR IS IT " +
       "JE JM JO JP KE KG KH KI KM KN KP KR KW KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MG MH MK ML MM MN MO MR MT MU MV MW MX MY MZ " +
@@ -194,6 +233,7 @@
     let trips = [];                 // { id, c: "FR", a: "2026-01-03", d: "2026-01-10" | null }
     let settings = { mode: "any" }; // "any" = any part of a day counts, "midnight" = only nights count
     let tab = "overview";
+    let tripsView = "calendar";       // Trips tab: "list" or "calendar"
     let periodId = null;
     let editingId = null;
 
@@ -240,28 +280,6 @@
       return Object.entries(sets).map(([code, s]) => ({ code, days: s.size })).sort((x, y) => y.days - x.days);
     }
 
-    // Schengen 90/180: entry and exit days both count; all Schengen countries are pooled.
-    function schengenInfo() {
-      const today = toNum(todayStr());
-      const days = new Set();
-      for (const t of trips) {
-        if (!SCHENGEN.has(t.c)) continue;
-        const r = tripRange(t, "any");
-        if (r) for (let n = r[0]; n <= r[1]; n++) days.add(n);
-      }
-      const sorted = [...days].sort((a, b) => a - b);
-      const usedOn = ref => sorted.filter(n => n > ref - 180 && n <= ref).length;
-      const used = usedOn(today);
-      // Look ahead through planned trips for the worst point
-      let peak = used, peakDay = today;
-      const last = sorted.length ? sorted[sorted.length - 1] : today;
-      for (let ref = today + 1; ref <= last; ref++) {
-        const u = usedOn(ref);
-        if (u > peak) { peak = u; peakDay = ref; }
-      }
-      return { used, peak, peakDay };
-    }
-
     function periods() {
       const t = todayStr(), y = +t.slice(0, 4);
       const years = new Set([y]);
@@ -284,10 +302,18 @@
 
     // ---------- Rendering ----------
     function render() {
-      document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+      document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === (tab === "import" ? "trips" : tab)));
       const main = document.getElementById("main");
-      main.innerHTML = tab === "overview" ? renderOverview() : renderTrips();
+      main.innerHTML = tab === "overview" ? renderOverview() : tab === "import" ? renderImport() : renderTrips();
+      $("addBtn").style.display = tab === "import" ? "none" : "block";
+      if (tab === "import") wireImport();
+      const ib = document.getElementById("importBtn");
+      if (ib) ib.onclick = startImport;
+      const da = document.getElementById("deleteAll");
+      if (da) da.onclick = deleteAll;
       if (tab === "overview") {
+        document.getElementById("expPdf").onclick = e => runExport(e.target, "pdf");
+        document.getElementById("expCsv").onclick = e => runExport(e.target, "csv");
         document.getElementById("period").onchange = e => { periodId = e.target.value; render(); };
         document.getElementById("mode").onchange = async e => {
           settings.mode = e.target.value;
@@ -296,7 +322,17 @@
         };
       }
       main.querySelectorAll(".trip").forEach(el => el.onclick = () => openSheet(el.dataset.id));
+      main.querySelectorAll(".seg button").forEach(b => b.onclick = () => { tripsView = b.dataset.view; render(); });
+      main.querySelectorAll(".tile").forEach(el => el.onclick = () => el.dataset.trip ? openSheet(el.dataset.trip) : openSheet(null, el.dataset.day));
+      if (tab === "trips" && tripsView === "calendar" && !render.scrolled) {
+        render.scrolled = true;
+        const cm = document.getElementById("curMonth");
+        if (cm) cm.scrollIntoView({ block: "start" });
+      }
+      if (tab !== "trips" || tripsView !== "calendar") render.scrolled = false;
     }
+
+    const flagCircle = (c, cls = "") => `<span class="fc ${cls}"><span>${flagOf(c)}</span></span>`;
 
     function renderOverview() {
       const today = toNum(todayStr());
@@ -304,67 +340,124 @@
       if (!periodId || !ps.find(p => p.id === periodId)) periodId = "y" + todayStr().slice(0, 4);
       const p = ps.find(x => x.id === periodId);
       const counts = countByCountry(p.s, p.e, settings.mode);
-      let h = "";
+      const groups = [...new Set(ps.map(x => x.group))];
+      const opts = groups.map(g => `<optgroup label="${esc(g)}">${ps.filter(x => x.group === g)
+        .map(x => `<option value="${x.id}" ${x.id === periodId ? "selected" : ""}>${esc(x.group === "UK tax year (6 Apr – 5 Apr)" ? "UK tax year " + x.label : x.label)}</option>`).join("")}</optgroup>`).join("");
+      let h = `<select id="period" style="margin-bottom:12px">${opts}</select>`;
+
+      // Main tracker: the country you've spent the most days in
+      const top = counts[0];
+      if (top) {
+        const left = TAX_THRESHOLD - top.days;
+        h += `<div class="card"><div class="label">Most time in</div>
+          <div class="hero-top">${flagCircle(top.code, "hero-flag")}
+            <div class="grow"><div class="name" style="font-size:20px">${esc(nameOf(top.code))}</div>
+            <div class="sub">${esc(p.group.startsWith("UK") ? "UK tax year " + p.label : p.label)}</div></div>
+            <div style="text-align:right"><div class="hero-days">${top.days}</div><div class="sub">day${top.days === 1 ? "" : "s"}</div></div>
+          </div>
+          <div class="bar"><div style="width:${Math.min(100, top.days / TAX_THRESHOLD * 100)}%;background:${colour(top.days, TAX_THRESHOLD)}"></div></div>
+          <div class="sub" style="margin-top:8px">${left > 0 ? `${left} days to go until ${TAX_THRESHOLD}` : `Past ${TAX_THRESHOLD} days, which usually makes you tax resident`}</div></div>`;
+      } else {
+        h += `<div class="card empty">No days logged in this period yet.</div>`;
+      }
 
       // Where you are now
       const now = trips.filter(t => !t.d && toNum(t.a) <= today).sort((a, b) => b.a.localeCompare(a.a))[0];
       if (now) {
-        h += `<div class="card"><div class="label">Right now</div>
-          <div class="row" style="border:none;padding:0"><span class="flag">${flagOf(now.c)}</span>
-          <div class="grow"><div class="name">${esc(nameOf(now.c))}</div>
+        h += `<div class="card"><div class="row" style="border:none;padding:0">${flagCircle(now.c)}
+          <div class="grow"><div class="name">Now in ${esc(nameOf(now.c))}</div>
           <div class="sub">Since ${fmt(now.a)} · day ${today - toNum(now.a) + 1}</div></div></div></div>`;
       }
 
-      // Schengen
-      const s = schengenInfo();
-      h += `<div class="card"><div class="label">Schengen 90/180</div>
-        <div><span class="big">${s.used}</span><span class="sub"> / 90 days used</span></div>
-        <div class="bar"><div style="width:${Math.min(100, s.used / 90 * 100)}%;background:${colour(s.used, 90)}"></div></div>
-        <div class="sub" style="margin-top:8px">${s.used >= 90 ? "Limit reached for the current 180-day window." : `${90 - s.used} days left in the current 180-day window`}</div>
-        ${s.peak > s.used ? `<div class="sub" style="margin-top:4px;color:${s.peak > 90 ? "var(--bad)" : "var(--hint)"}">With planned trips: peaks at ${s.peak}/90 on ${fmt(toStr(s.peakDay))}${s.peak > 90 ? " ⚠️ over the limit" : ""}</div>` : ""}
-      </div>`;
-
-      // Days by country
-      const groups = [...new Set(ps.map(x => x.group))];
-      const opts = groups.map(g => `<optgroup label="${esc(g)}">${ps.filter(x => x.group === g)
-        .map(x => `<option value="${x.id}" ${x.id === periodId ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</optgroup>`).join("");
-      const rows = counts.map(c => `
-        <div class="row"><span class="flag">${flagOf(c.code)}</span>
-          <div class="grow"><div class="name">${esc(nameOf(c.code))}</div>
-            <div class="sub">${c.days >= TAX_THRESHOLD ? `Over ${TAX_THRESHOLD} days` : `${TAX_THRESHOLD - c.days} days below ${TAX_THRESHOLD}`}</div>
-            <div class="bar"><div style="width:${Math.min(100, c.days / TAX_THRESHOLD * 100)}%;background:${colour(c.days, TAX_THRESHOLD)}"></div></div>
-          </div>
-          <div class="days">${c.days}<div class="sub">days</div></div>
-        </div>`).join("");
-      h += `<div class="card"><div class="label">Days by country</div>
-        <select id="period">${opts}</select>
-        <div style="margin-top:6px">${rows || `<div class="empty">No days logged in this period.</div>`}</div></div>`;
+      // Every country in the period
+      if (counts.length > 1) {
+        h += `<div class="card"><div class="label">All countries</div>${counts.map(c => `
+          <div class="row">${flagCircle(c.code, "lg")}
+            <div class="grow"><div class="name">${esc(nameOf(c.code))}</div>
+              <div class="bar"><div style="width:${Math.min(100, c.days / TAX_THRESHOLD * 100)}%;background:${colour(c.days, TAX_THRESHOLD)}"></div></div>
+            </div>
+            <div class="days">${c.days}<div class="sub">day${c.days === 1 ? "" : "s"}</div></div>
+          </div>`).join("")}</div>`;
+      }
 
       // Counting method
       h += `<div class="card"><div class="label">How travel days count</div>
         <select id="mode">
           <option value="any" ${settings.mode === "any" ? "selected" : ""}>Any part of a day counts</option>
           <option value="midnight" ${settings.mode === "midnight" ? "selected" : ""}>Only nights count (UK-style midnight rule)</option>
-        </select>
-        <div class="note" style="margin:8px 0 0">Applies to “Days by country”. Schengen always counts entry and exit days.</div></div>`;
+        </select></div>`;
+
+      h += `<div class="card"><div class="label">Export</div>
+        <div class="sub">A PDF report for the period picked at the top, or every trip as a spreadsheet (CSV). ${inTelegram ? "Files arrive in your chat with the bot." : "Files download to this device."}</div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn" id="expPdf">📄 PDF report</button>
+          <button class="btn outline" id="expCsv" style="margin:0">📊 CSV</button>
+        </div></div>`;
 
       h += `<p class="note">Estimates only, not legal or tax advice. Rules differ by country. Check with an adviser before relying on these numbers.</p>`;
       return h;
     }
 
+    // ---------- Calendar ----------
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    function renderCalendar() {
+      const todayN = toNum(todayStr());
+      // Which countries (and trips) cover each day, in travel order
+      const byDay = new Map();
+      [...trips].sort((a, b) => a.a.localeCompare(b.a)).forEach(t => {
+        const r = tripRange(t, "any");
+        if (!r) return;
+        for (let n = r[0]; n <= r[1]; n++) {
+          const e = byDay.get(n) || { codes: [], ids: [] };
+          if (!e.codes.includes(t.c)) e.codes.push(t.c);
+          e.ids.push(t.id);
+          byDay.set(n, e);
+        }
+      });
+      const t0 = todayStr();
+      let y = +t0.slice(0, 4), m = +t0.slice(5, 7) - 1, endY = y, endM = m;
+      trips.forEach(t => {
+        const a = t.a; if (+a.slice(0, 4) * 12 + +a.slice(5, 7) - 1 < y * 12 + m) { y = +a.slice(0, 4); m = +a.slice(5, 7) - 1; }
+        const d = t.d || t0; if (+d.slice(0, 4) * 12 + +d.slice(5, 7) - 1 > endY * 12 + endM) { endY = +d.slice(0, 4); endM = +d.slice(5, 7) - 1; }
+      });
+      const todayDow = (new Date().getDay() + 6) % 7; // Monday = 0
+      let h = `<div class="wk">${"MTWTFSS".split("").map((l, i) => `<div class="${i === todayDow ? "on" : ""}">${l}</div>`).join("")}</div>`;
+      while (y * 12 + m <= endY * 12 + endM) {
+        const first = Math.round(Date.UTC(y, m, 1) / DAY);
+        const len = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+        const offset = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7;
+        const isCur = y === +t0.slice(0, 4) && m === +t0.slice(5, 7) - 1;
+        let cells = "<div></div>".repeat(offset);
+        for (let i = 0; i < len; i++) {
+          const n = first + i, e = byDay.get(n);
+          const flags = e ? e.codes.slice(0, 3).map(c => flagCircle(c)).join("") : `<span class="dot"></span>`;
+          cells += `<div class="tile ${e ? "" : "none"} ${n === todayN ? "today" : ""}" data-day="${toStr(n)}" data-trip="${e ? esc(e.ids[e.ids.length - 1]) : ""}">
+            <div class="flags ${e && e.codes.length > 2 ? "n3" : ""}">${flags}</div><div class="dnum">${i + 1}</div></div>`;
+        }
+        h += `<div class="month" ${isCur ? 'id="curMonth"' : ""}><div class="mhead"><span class="mname">${MONTHS[m]}</span><span class="myear">${y}</span></div><div class="grid">${cells}</div></div>`;
+        if (++m === 12) { m = 0; y++; }
+      }
+      return h + `<p class="note">Tap a day to edit that trip, or an empty day to add one.</p>`;
+    }
+
     function renderTrips() {
-      if (!trips.length) return `<div class="card empty">No trips yet.<br>Tap “+ Add trip” to log where you've been.</div>`;
+      const importBtn = `<button class="btn outline" id="importBtn">📷 Import from photos</button>`;
+      if (!trips.length) return importBtn + `<div class="card empty">No trips yet.<br>Import them from your photos, or tap “+ Add trip”.</div>`;
+      const seg = `<div class="seg"><button data-view="list" class="${tripsView === "list" ? "on" : ""}">☰ List</button><button data-view="calendar" class="${tripsView === "calendar" ? "on" : ""}">📅 Calendar</button></div>`;
+      if (tripsView === "calendar") return seg + renderCalendar() + importBtn;
       const today = todayStr();
       const rows = [...trips].sort((a, b) => b.a.localeCompare(a.a)).map(t => {
         const r = tripRange(t, "any");
         const n = r ? r[1] - r[0] + 1 : 0;
         const pill = t.a > today ? `<span class="pill grey">Planned</span>` : !t.d ? `<span class="pill">Now</span>` : "";
-        return `<div class="row trip" data-id="${esc(t.id)}"><span class="flag">${flagOf(t.c)}</span>
+        return `<div class="row trip" data-id="${esc(t.id)}">${flagCircle(t.c, "lg")}
           <div class="grow"><div class="name">${esc(nameOf(t.c))}${pill}</div>
-          <div class="sub">${fmt(t.a)} – ${t.d ? fmt(t.d) : "now"}</div></div>
-          <div class="days">${n}<div class="sub">days</div></div></div>`;
+          <div class="sub">${fmt(t.a)}${!t.d ? " – now" : t.d !== t.a ? " – " + fmt(t.d) : ""}</div></div>
+          <div class="days">${n}<div class="sub">day${n === 1 ? "" : "s"}</div></div></div>`;
       }).join("");
-      return `<div class="card">${rows}</div><p class="note">Tap a trip to edit or delete it.</p>`;
+      return seg + importBtn + `<div class="card">${rows}</div><p class="note">Tap a trip to edit or delete it.</p>
+        <button class="btn danger" id="deleteAll">Delete all trips</button>`;
     }
 
     // ---------- Add / edit sheet ----------
@@ -383,14 +476,14 @@
 
     function syncDep() { $("depField").style.display = $("fOngoing").checked ? "none" : "block"; }
 
-    function openSheet(id) {
+    function openSheet(id, day) {
       editingId = id || null;
       const t = trips.find(x => x.id === id);
       $("sheetTitle").textContent = t ? "Edit trip" : "Add trip";
       fillCountries(t ? t.c : "");
-      $("fArr").value = t ? t.a : todayStr();
+      $("fArr").value = t ? t.a : (day || todayStr());
       $("fOngoing").checked = t ? !t.d : false;
-      $("fDep").value = t && t.d ? t.d : todayStr();
+      $("fDep").value = t && t.d ? t.d : (day || todayStr());
       $("fDelete").style.display = t ? "block" : "none";
       $("fErr").textContent = "";
       syncDep();
@@ -437,6 +530,444 @@
       };
       if (tgAtLeast("6.2")) tg.showConfirm("Delete this trip?", go);
       else go(window.confirm("Delete this trip?"));
+    }
+
+    // ---------- Import from photos ----------
+    // Reads the date + GPS tag of each picked photo on the phone (nothing is uploaded),
+    // works out the country, and groups photos into trips for the user to review.
+    const NUM2A2 = Object.fromEntries("100:BG,104:MM,108:BI,112:BY,116:KH,120:CM,124:CA,132:CV,136:KY,140:CF,144:LK,148:TD,152:CL,156:CN,158:TW,170:CO,174:KM,178:CG,180:CD,184:CK,188:CR,191:HR,192:CU,196:CY,203:CZ,204:BJ,208:DK,212:DM,214:DO,218:EC,222:SV,226:GQ,231:ET,232:ER,233:EE,234:FO,238:FK,239:GS,242:FJ,246:FI,248:AX,250:FR,258:PF,260:TF,262:DJ,266:GA,268:GE,270:GM,275:PS,276:DE,288:GH,296:KI,300:GR,304:GL,308:GD,316:GU,320:GT,324:GN,328:GY,332:HT,334:HM,336:VA,340:HN,344:HK,348:HU,352:IS,356:IN,360:ID,364:IR,368:IQ,372:IE,376:IL,380:IT,384:CI,388:JM,392:JP,398:KZ,400:JO,404:KE,408:KP,410:KR,414:KW,417:KG,418:LA,422:LB,426:LS,428:LV,430:LR,434:LY,438:LI,440:LT,442:LU,446:MO,450:MG,454:MW,458:MY,462:MV,466:ML,470:MT,478:MR,480:MU,484:MX,492:MC,496:MN,498:MD,499:ME,500:MS,504:MA,508:MZ,512:OM,516:NA,520:NR,524:NP,528:NL,531:CW,533:AW,534:SX,540:NC,548:VU,554:NZ,558:NI,562:NE,566:NG,570:NU,574:NF,578:NO,580:MP,583:FM,584:MH,585:PW,586:PK,591:PA,598:PG,600:PY,604:PE,608:PH,612:PN,616:PL,620:PT,624:GW,626:TL,630:PR,634:QA,642:RO,643:RU,646:RW,652:BL,654:SH,659:KN,660:AI,662:LC,663:MF,666:PM,670:VC,674:SM,678:ST,682:SA,686:SN,688:RS,690:SC,694:SL,702:SG,703:SK,704:VN,705:SI,706:SO,710:ZA,716:ZW,724:ES,728:SS,729:SD,732:EH,740:SR,748:SZ,752:SE,756:CH,760:SY,762:TJ,764:TH,768:TG,776:TO,780:TT,784:AE,788:TN,792:TR,795:TM,796:TC,800:UG,804:UA,807:MK,818:EG,826:GB,831:GG,832:JE,833:IM,834:TZ,840:US,850:VI,854:BF,858:UY,860:UZ,862:VE,876:WF,882:WS,887:YE,894:ZM,016:AS,086:IO,060:BM,092:VG,090:SB,096:BN,076:BR,072:BW,070:BA,068:BO,064:BT,084:BZ,056:BE,052:BB,050:BD,048:BH,044:BS,031:AZ,040:AT,036:AU,051:AM,032:AR,028:AG,024:AO,020:AD,012:DZ,008:AL,004:AF,010:AQ".split(",").map(x => x.split(":")));
+    const NAME2A2 = { "Somaliland": "SO", "Kosovo": "XK", "N. Cyprus": "CY", "Indian Ocean Ter.": "AU", "Siachen Glacier": "IN" };
+    Object.values(NUM2A2).concat(Object.values(NAME2A2)).forEach(c => {
+      if (CODE_SET.has(c)) return;
+      CODE_SET.add(c);
+      COUNTRIES.push({ code: c, name: nameOf(c) });
+    });
+    COUNTRIES.sort((a, b) => a.name.localeCompare(b.name));
+    const MAX_GAP_DAYS = 7;     // photos in the same country this close together = one stay
+    const BRIDGE_DAYS = 3;      // a gap this short between two countries is treated as travel: the earlier stay runs until you arrive
+    const PARALLEL = 6;
+    const TAGS = ["DateTimeOriginal", "CreateDate", "GPSLatitude", "GPSLongitude", "GPSLatitudeRef", "GPSLongitudeRef"];
+
+    let geo = null;
+    let imp = null; // { seen, total, withGps, points, proposals, busy, progress, error }
+    const newImport = () => ({ seen: new Set(), total: 0, withGps: 0, points: [], proposals: [], busy: false, progress: null, error: "" });
+
+    const loadScript = src => new Promise((res, rej) => {
+      const el = document.createElement("script");
+      el.src = src; el.onload = res; el.onerror = () => rej(new Error("couldn't load " + src));
+      document.head.appendChild(el);
+    });
+
+    async function loadImportTools() {
+      if (geo) return;
+      if (!window.exifr) await loadScript("https://cdn.jsdelivr.net/npm/exifr@7/dist/full.umd.js");
+      if (!window.topojson) await loadScript("https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js");
+      const topo = await (await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json")).json();
+      geo = topojson.feature(topo, topo.objects.countries).features.filter(f => f.geometry).map(f => {
+        const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+        let minX = 180, minY = 90, maxX = -180, maxY = -90;
+        polys.forEach(p => p[0].forEach(([x, y]) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }));
+        return { code: NUM2A2[f.id] || NAME2A2[f.properties.name], polys, bbox: [minX, minY, maxX, maxY] };
+      }).filter(c => c.code);
+    }
+
+    function inRing(x, y, ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+
+    const geoCache = new Map();
+    function countryAt(lat, lon) {
+      const key = lat.toFixed(2) + "," + lon.toFixed(2);
+      if (geoCache.has(key)) return geoCache.get(key);
+      let found = null;
+      for (const c of geo) {
+        const [a, b, cc, d] = c.bbox;
+        if (lon < a || lon > cc || lat < b || lat > d) continue;
+        if (c.polys.some(p => inRing(lon, lat, p[0]) && !p.slice(1).some(h => inRing(lon, lat, h)))) { found = c.code; break; }
+      }
+      if (!found) { // on a beach or a boat: nearest country within ~30 km
+        let bestKm = 30;
+        const kx = 111 * Math.cos(lat * Math.PI / 180);
+        for (const c of geo) {
+          const [a, b, cc, d] = c.bbox;
+          if (lon < a - 0.5 || lon > cc + 0.5 || lat < b - 0.5 || lat > d + 0.5) continue;
+          for (const p of c.polys) for (const [x, y] of p[0]) {
+            const km = Math.hypot((x - lon) * kx, (y - lat) * 111);
+            if (km < bestKm) { bestKm = km; found = c.code; }
+          }
+        }
+      }
+      geoCache.set(key, found);
+      return found;
+    }
+
+    const localDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    async function readPhoto(file) {
+      try {
+        const m = await exifr.parse(file, { pick: TAGS });
+        const date = m && (m.DateTimeOriginal || m.CreateDate);
+        if (!(date instanceof Date) || isNaN(date)) return;
+        if (typeof m.latitude !== "number" || typeof m.longitude !== "number" || (m.latitude === 0 && m.longitude === 0)) return;
+        imp.withGps++;
+        const c = countryAt(m.latitude, m.longitude);
+        if (c) imp.points.push({ t: date.getTime(), day: localDay(date), c });
+      } catch (e) {}
+    }
+
+    function buildProposals() {
+      const pts = [...imp.points].sort((a, b) => a.t - b.t);
+      const out = [];
+      for (const p of pts) {
+        const last = out[out.length - 1];
+        if (last && last.c === p.c && toNum(p.day) - toNum(last.d) <= MAX_GAP_DAYS) { last.d = p.day; last.photos++; }
+        else out.push({ c: p.c, a: p.day, d: p.day, photos: 1 });
+      }
+      // Short gaps between countries are travel: stretch the earlier stay to the day you arrived
+      for (let i = 0; i < out.length - 1; i++) {
+        const gap = toNum(out[i + 1].a) - toNum(out[i].d);
+        if (gap > 1 && gap <= BRIDGE_DAYS) out[i].d = out[i + 1].a;
+      }
+      // Latest stay with photos from the last few days: probably still there
+      const today = toNum(todayStr());
+      const last = out[out.length - 1];
+      if (last && today - toNum(last.d) <= 3) last.ongoing = true;
+      // Untick stays that overlap a trip you've already logged in the same country
+      for (const p of out) {
+        const pa = toNum(p.a), pd = p.ongoing ? today : toNum(p.d);
+        p.dupe = trips.some(t => {
+          if (t.c !== p.c) return false;
+          const r = tripRange(t, "any");
+          return r && r[0] <= pd && pa <= r[1];
+        });
+        p.on = !p.dupe;
+      }
+      imp.proposals = out;
+    }
+
+    async function startImport() {
+      imp = newImport();
+      tab = "import";
+      render();
+      if (!geo) {
+        imp.busy = true; render();
+        try { await loadImportTools(); }
+        catch (e) { imp.error = "Couldn't load the map data (" + e.message + "). Check your connection and try again."; }
+        imp.busy = false; render();
+      }
+    }
+
+    $("photoPicker").onchange = async e => {
+      const files = [...e.target.files].filter(f => {
+        const k = `${f.name}|${f.size}|${f.lastModified}`;
+        if (imp.seen.has(k)) return false;
+        imp.seen.add(k); return true;
+      });
+      e.target.value = "";
+      if (!files.length) return;
+      imp.busy = true; imp.progress = [0, files.length]; render();
+      let next = 0;
+      const worker = async () => {
+        while (next < files.length) {
+          await readPhoto(files[next++]);
+          imp.progress[0]++;
+          if (imp.progress[0] % 10 === 0 || imp.progress[0] === files.length) {
+            const bar = document.getElementById("impBar"), txt = document.getElementById("impTxt");
+            if (bar) bar.style.width = Math.round(imp.progress[0] / files.length * 100) + "%";
+            if (txt) txt.textContent = `Reading ${imp.progress[0]} of ${files.length} photos…`;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: PARALLEL }, worker));
+      imp.total += files.length;
+      imp.busy = false; imp.progress = null;
+      buildProposals();
+      render();
+    };
+
+    function renderImport() {
+      let h = `<div class="card"><div class="label">Import from photos</div>
+        <div class="sub">Reads the date and location saved in your photos and turns them into trips. Your photos never leave your phone.</div>
+        <ol class="tips">
+          <li><b>iPhone:</b> in the picker, tap <b>Options</b> and turn <b>Location</b> on.</li>
+          <li>Pick as many photos as you like. One or two per day is enough to place you.</li>
+        </ol></div>`;
+      if (imp.error) h += `<div class="card"><div class="err">${esc(imp.error)}</div></div>`;
+      if (imp.busy) {
+        h += `<div class="card"><div class="sub" id="impTxt">${imp.progress ? `Reading ${imp.progress[0]} of ${imp.progress[1]} photos…` : "Loading map data…"}</div>
+          <div class="progress"><div id="impBar" style="width:${imp.progress ? Math.round(imp.progress[0] / imp.progress[1] * 100) : 0}%"></div></div></div>`;
+      } else if (!imp.error) {
+        h += `<label class="btn ${imp.total ? "outline" : ""}" for="photoPicker" style="display:block;text-align:center;margin-bottom:12px">${imp.total ? "Pick more photos" : "Pick photos"}</label>`;
+      }
+      if (imp.total && !imp.busy) {
+        const sel = imp.proposals.filter(p => p.on).length;
+        h += `<div class="sub" style="margin:0 2px 8px">${imp.withGps} of ${imp.total} photos had a location${imp.withGps === 0 ? ". On iPhone, try again with Options → Location turned on." : ""}</div>`;
+        if (imp.proposals.length) {
+          h += `<div class="card">${[...imp.proposals].reverse().map(p => {
+            const i = imp.proposals.indexOf(p);
+            const end = p.ongoing ? todayStr() : p.d;
+            const n = toNum(end) - toNum(p.a) + 1;
+            return `<label class="row prop ${p.on ? "" : "dim"}" data-i="${i}">
+              <input type="checkbox" ${p.on ? "checked" : ""}>
+              <span class="flag">${flagOf(p.c)}</span>
+              <div class="grow"><div class="name">${esc(nameOf(p.c))}${p.ongoing ? `<span class="pill">Now</span>` : ""}</div>
+                <div class="sub">${fmt(p.a)}${p.ongoing ? " – now" : p.d !== p.a ? " – " + fmt(p.d) : ""} · ${p.photos} photo${p.photos === 1 ? "" : "s"}${p.dupe ? " · already logged" : ""}</div></div>
+              <div class="days">${n}<div class="sub">day${n === 1 ? "" : "s"}</div></div></label>`;
+          }).join("")}</div>
+          <p class="note">Stays are worked out from photo dates. Untick any that look wrong, and you can edit dates after adding.</p>
+          <button class="btn ${sel ? "" : "off"}" id="impSave">Add ${sel} trip${sel === 1 ? "" : "s"}</button>`;
+        }
+      }
+      h += `<button class="btn plain" id="impCancel">Cancel</button>`;
+      return h;
+    }
+
+    function wireImport() {
+      document.querySelectorAll(".prop").forEach(el => el.onchange = () => {
+        const p = imp.proposals[+el.dataset.i];
+        p.on = el.querySelector("input").checked;
+        render();
+      });
+      const save = document.getElementById("impSave");
+      if (save) save.onclick = saveImport;
+      document.getElementById("impCancel").onclick = () => { imp = null; tab = "trips"; render(); };
+    }
+
+    async function saveImport() {
+      const chosen = imp.proposals.filter(p => p.on);
+      const btn = document.getElementById("impSave");
+      btn.classList.add("off");
+      try {
+        for (let i = 0; i < chosen.length; i++) {
+          const p = chosen[i];
+          btn.textContent = `Saving ${i + 1} of ${chosen.length}…`;
+          const id = "t_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          const trip = { c: p.c, a: p.a, d: p.ongoing ? null : p.d };
+          await store.set(id, JSON.stringify(trip));
+          trips.push({ id, ...trip });
+        }
+        if (tgAtLeast("6.1")) tg.HapticFeedback.notificationOccurred("success");
+        imp = null; tab = "trips"; render();
+      } catch (e) {
+        imp.error = "Couldn't save: " + e.message;
+        render();
+      }
+    }
+
+    function deleteAll() {
+      const go = async ok => {
+        if (!ok) return;
+        for (const t of [...trips]) { try { await store.del(t.id); } catch (e) {} }
+        trips = [];
+        render();
+      };
+      const msg = `Delete all ${trips.length} trips? This can't be undone.`;
+      if (tgAtLeast("6.2")) tg.showConfirm(msg, go);
+      else go(window.confirm(msg));
+    }
+
+    // ---------- Export (CSV + PDF) ----------
+    // Inside Telegram, files are sent to the user's chat by the bot (api/send-file.js on Vercel),
+    // because Telegram's in-app browser can't save downloads. Outside Telegram they download normally.
+    function notify(msg) {
+      if (tgAtLeast("6.2")) return tg.showAlert(msg);
+      const t = $("toast");
+      t.textContent = msg; t.style.display = "block";
+      clearTimeout(notify.timer); notify.timer = setTimeout(() => t.style.display = "none", 4000);
+    }
+
+    const currentPeriod = () => periods().find(p => p.id === periodId) || periods()[0];
+    const periodName = p => p.group.startsWith("UK") ? "UK tax year " + p.label : p.label;
+    const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+    function makeCsv() {
+      const today = todayStr();
+      const rows = [["Country", "Country code", "Arrived", "Left", "Days", "Status"]];
+      [...trips].sort((a, b) => a.a.localeCompare(b.a)).forEach(t => {
+        const r = tripRange(t, "any");
+        rows.push([nameOf(t.c), t.c, t.a, t.d || "", r ? r[1] - r[0] + 1 : 0, t.a > today ? "Planned" : !t.d ? "Current" : ""]);
+      });
+      const q = v => { v = String(v); return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+      return new Blob(["﻿" + rows.map(r => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+    }
+
+    async function makePdf() {
+      if (!window.jspdf) await loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js");
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const W = 210, H = 297, M = 16;
+      const INK = [28, 28, 30], HINT = [134, 134, 140], LINE = [229, 229, 234], SOFT = [244, 244, 247];
+      const ACCENT = [36, 110, 190];
+      const LEVEL = d => d >= TAX_THRESHOLD ? [235, 64, 52] : d >= TAX_THRESHOLD * 0.8 ? [245, 150, 20] : [52, 180, 90];
+      const PALETTE = [[36, 110, 190], [229, 115, 60], [70, 160, 110], [150, 90, 190], [210, 70, 110], [40, 150, 160], [190, 150, 40], [90, 110, 140]];
+      const colourFor = c => PALETTE[(c.charCodeAt(0) * 7 + c.charCodeAt(1)) % PALETTE.length];
+
+      const p = currentPeriod();
+      const counts = countByCountry(p.s, p.e, settings.mode);
+      const allDays = new Set();
+      trips.forEach(t => { const r = tripRange(t, settings.mode); if (r) for (let n = Math.max(r[0], p.s); n <= Math.min(r[1], p.e); n++) allDays.add(n); });
+      const inPeriod = [...trips].filter(t => { const r = tripRange(t, "any"); return r && r[0] <= p.e && r[1] >= p.s; }).sort((a, b) => a.a.localeCompare(b.a));
+      const daysIn = t => { const r = tripRange(t, settings.mode); return r ? Math.max(0, Math.min(r[1], p.e) - Math.max(r[0], p.s) + 1) : 0; };
+      const user = inTelegram && tg.initDataUnsafe.user ? [tg.initDataUnsafe.user.first_name, tg.initDataUnsafe.user.last_name].filter(Boolean).join(" ") : "";
+
+      const text = (str, x, y, o = {}) => {
+        doc.setFont("helvetica", o.bold ? "bold" : "normal");
+        doc.setFontSize(o.size || 10);
+        doc.setTextColor(...(o.colour || INK));
+        doc.text(String(str), x, y, { align: o.align || "left", baseline: o.baseline || "alphabetic" });
+      };
+      const badge = (code, cx, cy, r = 3.6) => {
+        doc.setFillColor(...colourFor(code)); doc.circle(cx, cy, r, "F");
+        text(code, cx, cy + 0.1, { size: r * 1.75, bold: true, colour: [255, 255, 255], align: "center", baseline: "middle" });
+      };
+
+      // Header band
+      doc.setFillColor(...ACCENT); doc.rect(0, 0, W, 44, "F");
+      doc.setFillColor(255, 255, 255); doc.setGState(new doc.GState({ opacity: 0.08 }));
+      doc.circle(W - 18, 6, 34, "F"); doc.circle(W - 52, 46, 20, "F");
+      doc.setGState(new doc.GState({ opacity: 1 }));
+      text(APP_NAME.toUpperCase(), M, 14, { size: 9, bold: true, colour: [210, 228, 248] });
+      text("Travel days report", M, 25, { size: 22, bold: true, colour: [255, 255, 255] });
+      text(`${periodName(p)}  ·  ${fmt(toStr(p.s))} – ${fmt(toStr(p.e))}`, M, 33, { size: 10.5, colour: [225, 236, 250] });
+      text(`Generated ${fmt(todayStr())}${user ? "  ·  " + user : ""}`, M, 39, { size: 8.5, colour: [190, 212, 240] });
+
+      // Summary tiles
+      let y = 54;
+      const top = counts[0];
+      const tiles = [
+        ["MOST TIME IN", top ? nameOf(top.code) : "—", top ? `${top.days} days` : ""],
+        ["COUNTRIES", String(counts.length), counts.length === 1 ? "country" : "countries"],
+        ["DAYS LOGGED", String(allDays.size), `of ${p.e - p.s + 1} in period`],
+        ["TRIPS", String(inPeriod.length), "in this period"]
+      ];
+      const tw = (W - 2 * M - 3 * 4) / 4;
+      tiles.forEach(([label, value, sub], i) => {
+        const x = M + i * (tw + 4);
+        doc.setFillColor(...SOFT); doc.roundedRect(x, y, tw, 26, 3, 3, "F");
+        text(label, x + 4, y + 7, { size: 6.8, bold: true, colour: HINT });
+        let v = value; doc.setFont("helvetica", "bold"); doc.setFontSize(i === 0 ? 12 : 17);
+        while (doc.getTextWidth(v) > tw - 8 && v.length > 3) v = v.slice(0, -2) + "…";
+        text(v, x + 4, y + 16, { size: i === 0 ? 12 : 17, bold: true });
+        text(sub, x + 4, y + 22, { size: 7.5, colour: HINT });
+      });
+      y += 38;
+
+      // Days by country chart
+      const section = (title, note) => {
+        text(title, M, y, { size: 13, bold: true });
+        if (note) text(note, W - M, y, { size: 8, colour: HINT, align: "right" });
+        y += 4; doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, y, W - M, y); y += 7;
+      };
+      const newPage = () => {
+        doc.addPage(); y = 20;
+        text(`${APP_NAME}  ·  ${periodName(p)}`, M, 12, { size: 8, colour: HINT });
+      };
+
+      section("Days by country", `bar shows progress to ${TAX_THRESHOLD} days`);
+      if (!counts.length) { text("No days logged in this period.", M, y, { colour: HINT }); y += 10; }
+      const scale = Math.max(TAX_THRESHOLD, counts.length ? counts[0].days : 0) * 1.05;
+      const bx = M + 62, bw = W - M - 22 - bx;
+      counts.forEach(c => {
+        if (y > H - 30) newPage();
+        badge(c.code, M + 3.6, y - 1.2);
+        let name = nameOf(c.code); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+        while (doc.getTextWidth(name) > 50 && name.length > 3) name = name.slice(0, -2) + "…";
+        text(name, M + 10, y, { bold: true });
+        doc.setFillColor(...SOFT); doc.roundedRect(bx, y - 3.4, bw, 4.4, 2.2, 2.2, "F");
+        const fw = Math.max(4.4, bw * c.days / scale);
+        doc.setFillColor(...LEVEL(c.days)); doc.roundedRect(bx, y - 3.4, fw, 4.4, 2.2, 2.2, "F");
+        const mx = bx + bw * TAX_THRESHOLD / scale;
+        doc.setDrawColor(...HINT); doc.setLineWidth(0.3); doc.setLineDashPattern([0.8, 0.8], 0); doc.line(mx, y - 5, mx, y + 2); doc.setLineDashPattern([], 0);
+        text(String(c.days), W - M, y, { size: 11, bold: true, align: "right" });
+        y += 10;
+      });
+      if (counts.length) { text(`Dashed line = ${TAX_THRESHOLD} days, a common tax-residency threshold.`, M, y - 2, { size: 7.5, colour: HINT }); y += 8; }
+
+      // Trip log table
+      if (y > H - 50) newPage();
+      section("Trip log", `${inPeriod.length} trip${inPeriod.length === 1 ? "" : "s"}`);
+      const cols = [M + 2, M + 82, M + 112, M + 142, W - M - 2];
+      const head = () => {
+        doc.setFillColor(...SOFT); doc.rect(M, y - 5, W - 2 * M, 8, "F");
+        ["COUNTRY", "ARRIVED", "LEFT", "TRIP DAYS", "IN PERIOD"].forEach((h, i) =>
+          text(h, cols[i], y, { size: 7, bold: true, colour: HINT, align: i === 4 ? "right" : "left" }));
+        y += 8;
+      };
+      head();
+      if (!inPeriod.length) { text("No trips in this period.", M + 2, y + 2, { colour: HINT }); y += 10; }
+      inPeriod.forEach((t, i) => {
+        if (y > H - 24) { newPage(); head(); }
+        if (i % 2 === 1) { doc.setFillColor(250, 250, 252); doc.rect(M, y - 5, W - 2 * M, 8, "F"); }
+        const r = tripRange(t, "any");
+        badge(t.c, cols[0] + 2.6, y - 1.2, 2.6);
+        let name = nameOf(t.c); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+        while (doc.getTextWidth(name) > 66 && name.length > 3) name = name.slice(0, -2) + "…";
+        text(name, cols[0] + 8, y, { size: 9.5 });
+        text(fmt(t.a), cols[1], y, { size: 9 });
+        text(t.d ? fmt(t.d) : (t.a > todayStr() ? "—" : "Still there"), cols[2], y, { size: 9, colour: t.d ? INK : ACCENT });
+        text(r ? r[1] - r[0] + 1 : 0, cols[3], y, { size: 9 });
+        text(daysIn(t), cols[4], y, { size: 9.5, bold: true, align: "right" });
+        y += 8;
+      });
+
+      // Footer on every page
+      const pages = doc.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, H - 16, W - M, H - 16);
+        text(`Days counted: ${settings.mode === "midnight" ? "nights only (midnight rule)" : "any part of a day"}. Estimates only, not legal or tax advice.`, M, H - 10, { size: 7.5, colour: HINT });
+        text(`Page ${i} of ${pages}`, W - M, H - 10, { size: 7.5, colour: HINT, align: "right" });
+      }
+      return doc.output("blob");
+    }
+
+    const blobToBase64 = blob => new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",")[1]);
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(blob);
+    });
+
+    async function deliver(blob, filename, caption) {
+      if (inTelegram) {
+        const resp = await fetch("/api/send-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData: tg.initData, filename, caption, data: await blobToBase64(blob) })
+        });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok || !j.ok) throw new Error(j.error || `the server answered ${resp.status}`);
+        notify("Sent ✓ Check your chat with the bot.");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+
+    async function runExport(btn, kind) {
+      if (btn.classList.contains("off")) return;
+      const label = btn.textContent;
+      btn.classList.add("off"); btn.textContent = "Preparing…";
+      try {
+        if (!trips.length) throw new Error("add a trip first");
+        if (kind === "csv") {
+          await deliver(makeCsv(), `${slug(APP_NAME)}-trips-${todayStr()}.csv`, "All your trips (CSV)");
+        } else {
+          const p = currentPeriod();
+          await deliver(await makePdf(), `${slug(APP_NAME)}-report-${slug(periodName(p))}.pdf`, `Travel days report · ${periodName(p)}`);
+        }
+      } catch (e) {
+        notify("Couldn't export: " + e.message);
+      } finally {
+        btn.classList.remove("off"); btn.textContent = label;
+      }
     }
 
     // ---------- Wiring ----------
