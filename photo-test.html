@@ -27,6 +27,9 @@
     .big { font-size: 40px; font-weight: 700; }
     .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 600; text-align: center; cursor: pointer; }
     .btn.off { opacity: .5; pointer-events: none; }
+    .btn.plain { background: transparent; color: var(--hint); margin-top: 6px; }
+    .bar { height: 6px; border-radius: 3px; background: rgba(128,128,128,.2); margin-top: 8px; overflow: hidden; }
+    .bar > div { height: 100%; background: var(--accent); transition: width .2s; }
     input[type=file] { display: none; }
     ol { margin: 6px 0 0; padding-left: 20px; } li { margin-bottom: 6px; font-size: 14px; line-height: 1.4; }
     .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(128,128,128,.15); font-size: 15px; }
@@ -43,14 +46,16 @@
     <div class="label">Before you pick</div>
     <ol>
       <li><b>iPhone:</b> in the photo picker, tap <b>Options</b> at the top and turn <b>Location</b> on if you see it.</li>
-      <li>Pick photos from a few different trips. 20–200 is plenty for a test.</li>
+      <li>Pick as many photos as you like (700+ is fine). If the picker gets stuck, pick in batches: results add up, and repeats are skipped.</li>
       <li>Screenshot the result and send it to me.</li>
     </ol>
   </div>
 
   <label class="btn off" id="pickBtn" for="picker">Loading map data…</label>
   <input type="file" id="picker" accept="image/*" multiple>
+  <button class="btn plain" id="clearBtn" style="display:none">Start over</button>
 
+  <div id="progress"></div>
   <div id="out"></div>
 
   <div class="card">
@@ -116,36 +121,81 @@
       return best || "Unknown (at sea?)";
     }
 
-    // ---------- Reading photos ----------
+    // ---------- Reading photos (fast, in parallel, adds up across several picks) ----------
     const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const fmt = k => new Date(k + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-    const MAX_GAP_DAYS = 7; // photos in the same country this close together are treated as one stay
+    const MAX_GAP_DAYS = 7;   // photos in the same country this close together are treated as one stay
+    const PARALLEL = 6;       // photos read at the same time
+    const TAGS = ["DateTimeOriginal", "CreateDate", "GPSLatitude", "GPSLongitude", "GPSLatitudeRef", "GPSLongitudeRef"];
+
+    const state = { seen: new Set(), total: 0, withGps: 0, withDate: 0, failed: 0, points: [] };
+    const countryCache = new Map(); // ~1 km grid → country, so repeat locations are instant
+    const cachedCountry = (lat, lon) => {
+      const k = lat.toFixed(2) + "," + lon.toFixed(2);
+      if (!countryCache.has(k)) countryCache.set(k, countryAt(lat, lon));
+      return countryCache.get(k);
+    };
+
+    async function readOne(file) {
+      try {
+        const m = await exifr.parse(file, { pick: TAGS });
+        const date = m && (m.DateTimeOriginal || m.CreateDate);
+        const okDate = date instanceof Date && !isNaN(date);
+        const hasGps = m && typeof m.latitude === "number" && typeof m.longitude === "number" && !(m.latitude === 0 && m.longitude === 0);
+        if (okDate) state.withDate++;
+        if (hasGps) state.withGps++;
+        if (hasGps && okDate) state.points.push({ t: date.getTime(), day: dayKey(date), country: cachedCountry(m.latitude, m.longitude) });
+      } catch (err) { state.failed++; }
+    }
+
+    function showProgress(done, total, started) {
+      const secs = Math.round((Date.now() - started) / 1000);
+      $("progress").innerHTML = `<div class="card"><div class="sub">Reading ${done} of ${total} photos… ${secs}s</div>
+        <div class="bar"><div style="width:${Math.round(done / total * 100)}%"></div></div></div>`;
+    }
 
     $("picker").onchange = async e => {
-      const files = [...e.target.files];
-      if (!files.length) return;
-      const out = $("out");
-      let withGps = 0, withDate = 0, failed = 0;
-      const points = [];
-      for (let i = 0; i < files.length; i++) {
-        out.innerHTML = `<div class="card"><div class="sub">Reading ${i + 1} of ${files.length}…</div></div>`;
-        try {
-          const m = await exifr.parse(files[i], { tiff: true, exif: true, gps: true, xmp: false, icc: false, iptc: false });
-          const date = m && (m.DateTimeOriginal || m.CreateDate || m.ModifyDate);
-          const hasGps = m && typeof m.latitude === "number" && typeof m.longitude === "number" && !(m.latitude === 0 && m.longitude === 0);
-          if (date instanceof Date && !isNaN(date)) withDate++;
-          if (hasGps) withGps++;
-          if (hasGps && date instanceof Date && !isNaN(date)) points.push({ t: date.getTime(), day: dayKey(date), country: countryAt(m.latitude, m.longitude) });
-        } catch (err) { failed++; }
-      }
+      // Skip photos already read in an earlier pick
+      const files = [...e.target.files].filter(f => {
+        const k = `${f.name}|${f.size}|${f.lastModified}`;
+        if (state.seen.has(k)) return false;
+        state.seen.add(k); return true;
+      });
       e.target.value = "";
-      render(files.length, withGps, withDate, failed, points);
+      if (!files.length) return;
+      $("pickBtn").classList.add("off");
+      const started = Date.now();
+      let next = 0, done = 0;
+      showProgress(0, files.length, started);
+      const worker = async () => {
+        while (next < files.length) {
+          const f = files[next++];
+          await readOne(f);
+          done++;
+          if (done % 10 === 0 || done === files.length) showProgress(done, files.length, started);
+        }
+      };
+      await Promise.all(Array.from({ length: PARALLEL }, worker));
+      state.total += files.length;
+      state.lastRun = { count: files.length, secs: ((Date.now() - started) / 1000).toFixed(1) };
+      $("progress").innerHTML = "";
+      $("pickBtn").textContent = "Add more photos";
+      $("pickBtn").classList.remove("off");
+      $("clearBtn").style.display = "block";
+      render();
+    };
+
+    $("clearBtn").onclick = () => {
+      Object.assign(state, { seen: new Set(), total: 0, withGps: 0, withDate: 0, failed: 0, points: [] });
+      $("out").innerHTML = "";
+      $("pickBtn").textContent = "Pick photos";
+      $("clearBtn").style.display = "none";
     };
 
     function buildTrips(points) {
-      points.sort((a, b) => a.t - b.t);
+      const sorted = [...points].sort((a, b) => a.t - b.t);
       const trips = [];
-      for (const p of points) {
+      for (const p of sorted) {
         const last = trips[trips.length - 1];
         const gap = last ? (new Date(p.day) - new Date(last.end)) / 86400000 : Infinity;
         if (last && last.country === p.country && gap <= MAX_GAP_DAYS) { last.end = p.day; last.photos++; }
@@ -154,7 +204,8 @@
       return trips;
     }
 
-    function render(total, withGps, withDate, failed, points) {
+    function render() {
+      const { total, withGps, withDate, failed, points } = state;
       const pct = Math.round(withGps / total * 100);
       const verdict = pct >= 80 ? ["Works ✅ — locations come through", "var(--ok)"]
         : pct > 0 ? ["Partial ⚠️ — some photos lost their location", "var(--warn)"]
@@ -162,20 +213,22 @@
       const trips = buildTrips(points);
       const byCountry = {};
       trips.forEach(t => { const n = (new Date(t.end) - new Date(t.start)) / 86400000 + 1; byCountry[t.country] = (byCountry[t.country] || 0) + n; });
+      const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
       let h = `<div class="card"><div class="label">Result</div>
-        <div><span class="big">${withGps}</span><span class="sub"> / ${total} photos had a location</span></div>
+        <div><span class="big">${withGps}</span><span class="sub"> / ${total} photos had a location (${pct}%)</span></div>
         <div class="verdict" style="color:${verdict[1]}">${verdict[0]}</div>
-        <div class="sub" style="margin-top:6px">${withDate} had a date taken${failed ? ` · ${failed} couldn't be read` : ""}</div></div>`;
+        <div class="sub" style="margin-top:6px">${withDate} had a date taken${failed ? ` · ${failed} couldn't be read` : ""}<br>
+        Last pick: ${plural(state.lastRun.count, "photo")} read in ${state.lastRun.secs}s</div></div>`;
 
       if (trips.length) {
+        h += `<div class="card"><div class="label">Days by country (estimated)</div>${Object.entries(byCountry).sort((a, b) => b[1] - a[1])
+          .map(([c, n]) => `<div class="row"><b>${esc(c)}</b><span><b>${n}</b> <span class="sub">day${n === 1 ? "" : "s"}</span></span></div>`).join("")}</div>`;
+
         h += `<div class="card"><div class="label">Trips found (${trips.length})</div>${[...trips].reverse().map(t => {
           const n = (new Date(t.end) - new Date(t.start)) / 86400000 + 1;
-          return `<div class="row"><div><b>${esc(t.country)}</b><div class="sub">${fmt(t.start)}${t.end !== t.start ? " – " + fmt(t.end) : ""} · ${t.photos} photo${t.photos > 1 ? "s" : ""}</div></div><div><b>${n}</b> <span class="sub">day${n > 1 ? "s" : ""}</span></div></div>`;
+          return `<div class="row"><div><b>${esc(t.country)}</b><div class="sub">${fmt(t.start)}${t.end !== t.start ? " – " + fmt(t.end) : ""} · ${plural(t.photos, "photo")}</div></div><div><b>${n}</b> <span class="sub">day${n === 1 ? "" : "s"}</span></div></div>`;
         }).join("")}<div class="sub" style="margin-top:8px">Photos in the same country up to ${MAX_GAP_DAYS} days apart are joined into one stay.</div></div>`;
-
-        h += `<div class="card"><div class="label">Days by country (estimated)</div>${Object.entries(byCountry).sort((a, b) => b[1] - a[1])
-          .map(([c, n]) => `<div class="row"><b>${esc(c)}</b><span><b>${n}</b> <span class="sub">day${n > 1 ? "s" : ""}</span></span></div>`).join("")}</div>`;
       } else if (withGps === 0) {
         h += `<div class="card"><div class="sub">No locations came through. On iPhone, try again and look for <b>Options → Location</b> in the picker. If there's no such option inside Telegram, Telegram's picker is stripping it.</div></div>`;
       }
